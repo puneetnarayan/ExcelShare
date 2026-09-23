@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Collaborative Excel</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">▦ Collaborative Excel</div>
+  <div class="toolbar">
+    <button id="undoBtn" title="Undo">↶</button>
+    <button id="redoBtn" title="Redo">↷</button>
+    <span class="separator"></span>
+    <button id="boldBtn"><b>B</b></button>
+    <button id="italicBtn"><i>I</i></button>
+    <button id="wrapBtn">Wrap</button>
+    <button id="freezeBtn">Freeze</button>
+    <span class="separator"></span>
+    <button id="historyBtn">History</button>
+    <button id="exportBtn">Export</button>
+  </div>
+  <div class="users">● 1 user</div>
+</header>
+
+<div class="formula-bar">
+  <input id="nameBox" value="A1" title="Cell reference">
+  <span class="fx">fx</span>
+  <input id="formulaBar" placeholder="Select a cell...">
+</div>
+
+<main>
+  <div class="spreadsheet-container">
+    <div id="spreadsheet" tabindex="0"></div>
+  </div>
+
+  <aside id="historyPanel" class="history-panel hidden">
+    <div class="history-header">
+      <strong>Edit History</strong>
+      <button id="closeHistory">×</button>
+    </div>
+    <div id="historyList"></div>
+  </aside>
+</main>
+
+<footer id="sheetTabs" class="sheet-tabs"></footer>
+<script src="app.js"></script>
+</body>
+</html>
