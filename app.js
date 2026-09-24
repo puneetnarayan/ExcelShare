@@ -5,7 +5,7 @@ const SUPABASE_URL="https://ccqhvmavmgngevihtcnf.supabase.co";
 const SUPABASE_KEY=["sb_publishable_","ajVwLJ-Lb2tHeLFspj7gUQ_jZ_R9ide"].join("");
 const supabase=createClient(SUPABASE_URL,SUPABASE_KEY);
 
-const state={user:null,workbook:null,sheets:[],sheet:null,cells:new Map(),history:[],locks:[],selected:null,undo:[],redo:[],dirty:false};
+const state={user:null,workbook:null,sheets:[],sheet:null,cells:new Map(),history:[],locks:[],selected:null,undo:[],redo:[],dirty:false,starting:false,channel:null};
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
 const colName=n=>{let s="";n++;while(n){s=String.fromCharCode(65+(n-1)%26)+s;n=Math.floor((n-1)/26)}return s};
@@ -134,9 +134,13 @@ async function importXlsx(file){
 }
 async function exportXlsx(){
   const wb=XLSX.utils.book_new();for(const s of state.sheets){const {data}=await supabase.from("excel_cells").select("*").eq("worksheet_id",s.id);const maxR=Math.max(0,...(data||[]).map(x=>x.row_index)),maxC=Math.max(0,...(data||[]).map(x=>x.col_index));const a=Array.from({length:maxR+1},()=>Array(maxC+1).fill(""));(data||[]).forEach(x=>a[x.row_index][x.col_index]=x.value);XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(a),s.name.slice(0,31))}XLSX.writeFile(wb,(state.workbook.name||"ExcelShare")+".xlsx")}
-async function start(user){state.user=user;showApp();try{await ensureProfile(user);await loadWorkbook();await loadHistory();subscribe()}catch(e){alert(e.message)}}
-function subscribe(){
-  supabase.channel("excelshare-"+state.workbook.id).on("postgres_changes",{event:"*",schema:"public",table:"excel_cells"},p=>{if(p.new?.worksheet_id===state.sheet?.id&&p.new?.updated_by!==state.user.id){state.cells.set(key(p.new.row_index,p.new.col_index),p.new);render()}}).subscribe();
+async function start(user){if(state.starting||state.user)return;state.starting=true;state.user=user;showApp();try{await ensureProfile(user);await loadWorkbook();await loadHistory();await subscribe()}catch(e){console.error(e);alert(e.message);state.user=null;showAuth()}finally{state.starting=false}}
+async function subscribe(){
+  if(state.channel) await supabase.removeChannel(state.channel);
+  state.channel=supabase.channel("excelshare-"+state.workbook.id);
+  state.channel.on("postgres_changes",{event:"*",schema:"public",table:"excel_cells"},p=>{if(p.new?.worksheet_id===state.sheet?.id&&p.new?.updated_by!==state.user.id){state.cells.set(key(p.new.row_index,p.new.col_index),p.new);render()}});
+  const status=await state.channel.subscribe();
+  if(status!=="SUBSCRIBED") console.warn("ExcelShare realtime status:",status);
 }
 supabase.auth.getSession().then(({data})=>{if(data.session)start(data.session.user)});
 supabase.auth.onAuthStateChange((_e,s)=>{if(s&&!state.user)start(s.user)});
