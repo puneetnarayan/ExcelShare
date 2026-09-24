@@ -124,13 +124,59 @@ $("freezeBtn").onclick=()=>document.querySelector("thead").classList.toggle("fro
 $("exportBtn").onclick=()=>exportXlsx();
 $("openComputer").onchange=async e=>{const f=e.target.files[0];if(f)await importXlsx(f)};
 async function importXlsx(file){
-  const buf=await file.arrayBuffer(),wb=XLSX.read(buf,{type:"array"}),name=file.name.replace(/\.xlsx?$/i,"");
-  const {data:w,error}=await supabase.from("excel_workbooks").insert({name,owner_id:state.user.id,original_filename:file.name,source_type:"computer"}).select().single();
-  if(error)return alert(error.message);state.workbook=w;
-  state.sheets=[];for(let i=0;i<wb.SheetNames.length;i++){const n=wb.SheetNames[i],{data:s}=await supabase.from("excel_worksheets").insert({workbook_id:w.id,name:n,sort_order:i}).select().single();state.sheets.push(s);
-    const rows=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:""});const batch=[];rows.forEach((row,r)=>row.forEach((v,c)=>{if(v!=="")batch.push({worksheet_id:s.id,row_index:r,col_index:c,value:String(v),updated_by:state.user.id,format:{}})}));for(let i=0;i<batch.length;i+=500)await supabase.from("excel_cells").insert(batch.slice(i,i+500));
+  try{
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:"array",cellDates:true});
+    const name=file.name.replace(/\.xlsx?$/i,"")||"Imported Workbook";
+    if(!wb.SheetNames.length) throw new Error("The selected Excel file contains no worksheets.");
+
+    const {data:w,error:we}=await supabase.from("excel_workbooks")
+      .insert({name,owner_id:state.user.id,original_filename:file.name,source_type:"computer"})
+      .select().single();
+    if(we) throw we;
+    state.workbook=w;
+    state.sheets=[];
+    $("workbookTitle").textContent=name;
+
+    for(let si=0;si<wb.SheetNames.length;si++){
+      const sheetName=wb.SheetNames[si];
+      const {data:s,error:se}=await supabase.from("excel_worksheets")
+        .insert({workbook_id:w.id,name:sheetName,sort_order:si})
+        .select().single();
+      if(se) throw se;
+      state.sheets.push(s);
+
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:"",raw:false});
+      const batch=[];
+      rows.forEach((row,r)=>row.forEach((v,c)=>{
+        if(v!=="" && v!==null && v!==undefined){
+          batch.push({
+            worksheet_id:s.id,row_index:r,col_index:c,value:String(v),
+            formula:null,format:{},updated_by:state.user.id
+          });
+        }
+      }));
+
+      for(let p=0;p<batch.length;p+=300){
+        const part=batch.slice(p,p+300);
+        const {data:inserted,error:ce}=await supabase.from("excel_cells")
+          .insert(part).select();
+        if(ce) throw new Error("Could not import cells in sheet '"+sheetName+"': "+ce.message);
+        (inserted||[]).forEach(x=>state.cells.set(key(x.row_index,x.col_index),x));
+      }
+    }
+
+    state.sheet=state.sheets[0];
+    state.selected={r:0,c:0};
+    state.locks=[];
+    state.history=[];
+    await loadSheet();
+    await loadHistory();
+    await subscribe();
+  }catch(e){
+    console.error("ExcelShare import error:",e);
+    alert("Excel file could not be loaded.\n\n"+(e.message||e));
   }
-  state.sheet=state.sheets[0];$("workbookTitle").textContent=name;history=[];await loadSheet();
 }
 async function exportXlsx(){
   const wb=XLSX.utils.book_new();for(const s of state.sheets){const {data}=await supabase.from("excel_cells").select("*").eq("worksheet_id",s.id);const maxR=Math.max(0,...(data||[]).map(x=>x.row_index)),maxC=Math.max(0,...(data||[]).map(x=>x.col_index));const a=Array.from({length:maxR+1},()=>Array(maxC+1).fill(""));(data||[]).forEach(x=>a[x.row_index][x.col_index]=x.value);XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(a),s.name.slice(0,31))}XLSX.writeFile(wb,(state.workbook.name||"ExcelShare")+".xlsx")}
