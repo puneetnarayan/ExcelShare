@@ -1,185 +1,143 @@
-const workbook={
-Sales:[
-["Date","Salesperson","Region","Product","Units","Revenue","Status"],
-["2026-09-01","Raj","North","Product A",25,125000,"Active"],
-["2026-09-02","Amit","West","Product B",18,99000,"Active"],
-["2026-09-03","Neha","South","Product C",32,176000,"Active"],
-["2026-09-04","Priya","East","Product A",21,105000,"Active"],
-["2026-09-05","Raj","North","Product B",27,148500,"Active"],
-["2026-09-06","Amit","West","Product C",15,82500,"Active"]
-],
-Customers:[
-["Customer ID","Customer Name","City","State","Segment","Status"],
-["C001","ABC Industries","Delhi","Delhi","Enterprise","Active"],
-["C002","Sharma Traders","Pune","Maharashtra","SMB","Active"],
-["C003","Mysore Engineering","Mysuru","Karnataka","Enterprise","Active"],
-["C004","Eastern Supplies","Kolkata","West Bengal","SMB","Inactive"],
-["C005","Coastal Metals","Chennai","Tamil Nadu","Enterprise","Active"],
-["C006","Bharat Components","Hyderabad","Telangana","SMB","Active"]
-],
-Inventory:[
-["SKU","Product","Category","Warehouse","Stock","Reorder Level"],
-["P001","Product A","Industrial","Bengaluru",145,50],
-["P002","Product B","Industrial","Pune",82,40],
-["P003","Product C","Electrical","Chennai",36,45],
-["P004","Product D","Electrical","Delhi",210,60],
-["P005","Product E","Mechanical","Hyderabad",74,35],
-["P006","Product F","Mechanical","Kolkata",28,30]
-],
-Employees:[
-["Employee ID","Name","Department","Designation","Location","Joining Year"],
-["E001","Raj Kumar","Sales","Manager","Delhi",2021],
-["E002","Amit Shah","Sales","Executive","Pune",2023],
-["E003","Neha Rao","Operations","Manager","Bengaluru",2020],
-["E004","Priya Nair","Finance","Analyst","Chennai",2024],
-["E005","Vikram Singh","IT","Engineer","Hyderabad",2022],
-["E006","Anita Das","HR","Executive","Kolkata",2023]
-],
-Projects:[
-["Project ID","Project Name","Manager","Priority","Start Date","Status"],
-["PR001","Plant Automation","Raj Kumar","High","2026-07-01","In Progress"],
-["PR002","ERP Upgrade","Neha Rao","Medium","2026-08-10","In Progress"],
-["PR003","CRM Implementation","Vikram Singh","High","2026-06-15","Completed"],
-["PR004","Warehouse Digitisation","Amit Shah","Medium","2026-09-01","In Progress"],
-["PR005","Energy Monitoring","Priya Nair","Low","2026-09-10","Planning"],
-["PR006","Quality Dashboard","Anita Das","High","2026-08-20","In Progress"]
-]};
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+import * as XLSX from "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm";
 
-let currentSheet="Sales",selectedRow=1,selectedColumn=0,history=[],undoStack=[],redoStack=[];
-const spreadsheet=document.getElementById("spreadsheet");
-const sheetTabs=document.getElementById("sheetTabs");
-const formulaBar=document.getElementById("formulaBar");
-const nameBox=document.getElementById("nameBox");
+const SUPABASE_URL="https://ccqhvmavmgngevihtcnf.supabase.co";
+const SUPABASE_KEY=["sb_publishable_","ajVwLJ-Lb2tHeLFspj7gUQ_jZ_R9ide"].join("");
+const supabase=createClient(SUPABASE_URL,SUPABASE_KEY);
 
-function columnName(number){
-  let result=""; number++;
-  while(number>0){const remainder=(number-1)%26;result=String.fromCharCode(65+remainder)+result;number=Math.floor((number-1)/26)}
-  return result;
+const state={user:null,workbook:null,sheets:[],sheet:null,cells:new Map(),history:[],locks:[],selected:null,undo:[],redo:[],dirty:false};
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+const colName=n=>{let s="";n++;while(n){s=String.fromCharCode(65+(n-1)%26)+s;n=Math.floor((n-1)/26)}return s};
+const key=(r,c)=>r+":"+c;
+
+function authMessage(m){$("authMessage").textContent=m||""}
+function showApp(){ $("authScreen").classList.add("hidden");$("appScreen").classList.remove("hidden") }
+function showAuth(){ $("appScreen").classList.add("hidden");$("authScreen").classList.remove("hidden") }
+
+let signup=false;
+$("loginTab").onclick=()=>{signup=false;$("loginTab").classList.add("active");$("signupTab").classList.remove("active");$("authName").classList.add("hidden");$("authBtn").textContent="Sign In"};
+$("signupTab").onclick=()=>{signup=true;$("signupTab").classList.add("active");$("loginTab").classList.remove("active");$("authName").classList.remove("hidden");$("authBtn").textContent="Create Account"};
+$("authBtn").onclick=async()=>{
+  authMessage("Working...");
+  const email=$("authEmail").value.trim(),password=$("authPassword").value,name=$("authName").value.trim();
+  if(!email||!password)return authMessage("Email and password are required.");
+  const r=signup
+    ? await supabase.auth.signUp({email,password,options:{data:{display_name:name}}})
+    : await supabase.auth.signInWithPassword({email,password});
+  if(r.error)return authMessage(r.error.message);
+  if(signup&&!r.data.session)return authMessage("Check your email to verify the account, then sign in.");
+  if(r.data.user) await start(r.data.user);
+};
+$("signOutBtn").onclick=async()=>{await supabase.auth.signOut();location.reload()};
+
+async function ensureProfile(user){
+  await supabase.from("excel_profiles").upsert({user_id:user.id,email:user.email,display_name:user.user_metadata?.display_name||user.email?.split("@")[0]},{onConflict:"user_id"});
 }
-function escapeHTML(value){return String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;")}
-
-function renderSheetTabs(){
-  sheetTabs.innerHTML="";
-  Object.keys(workbook).forEach(sheetName=>{
-    const tab=document.createElement("div");
-    tab.className="sheet-tab"+(sheetName===currentSheet?" active":"");
-    tab.textContent=sheetName;
-    tab.onclick=()=>{currentSheet=sheetName;selectedRow=1;selectedColumn=0;render()};
-    sheetTabs.appendChild(tab);
-  });
+async function loadWorkbook(){
+  const {data:members,error}=await supabase.from("excel_workbook_members").select("workbook_id,role,excel_workbooks(*)").eq("user_id",state.user.id);
+  if(error)throw error;
+  if(!members?.length){
+    const {data,error:e}=await supabase.from("excel_workbooks").insert({name:"My Workbook",owner_id:state.user.id,source_type:"new"}).select().single();
+    if(e)throw e;
+    state.workbook=data;
+  }else state.workbook=members[0].excel_workbooks;
+  const {data:sheets,error:e}=await supabase.from("excel_worksheets").select("*").eq("workbook_id",state.workbook.id).order("sort_order");
+  if(e)throw e;
+  if(!sheets.length){
+    const {data:s,error:se}=await supabase.from("excel_worksheets").insert({workbook_id:state.workbook.id,name:"Sheet1",sort_order:0}).select().single();
+    if(se)throw se; state.sheets=[s]; 
+  }else state.sheets=sheets;
+  state.sheet=state.sheets[0];
+  $("userBadge").textContent=state.user.user_metadata?.display_name||state.user.email;
+  $("workbookTitle").textContent=state.workbook.name;
+  await loadSheet();
 }
-
+async function loadSheet(){
+  const [{data:cells,error:e},{data:locks,error:l}]=await Promise.all([
+    supabase.from("excel_cells").select("*").eq("worksheet_id",state.sheet.id),
+    supabase.from("excel_cell_locks").select("*").eq("worksheet_id",state.sheet.id)
+  ]);
+  if(e)throw e;if(l)throw l;
+  state.cells.clear();cells.forEach(x=>state.cells.set(key(x.row_index,x.col_index),x));
+  state.locks=locks||[];render();
+}
+function isLocked(r,c){return state.locks.some(x=>x.row_start<=r&&x.row_end>=r&&x.col_start<=c&&x.col_end>=c)}
+function selectedCell(){return state.selected||{r:0,c:0}}
+function selectCell(r,c){state.selected={r,c};$("nameBox").value=colName(c)+(r+1);const x=state.cells.get(key(r,c));$("formulaBar").value=x?.formula??x?.value??"";render()}
 function render(){
-  renderSheetTabs();
-  const data=workbook[currentSheet];
-  const columns=Math.max(12,...data.map(row=>row.length));
-  const rows=Math.max(data.length,60);
-  let html='<table><colgroup><col style="width:46px">';
-  for(let c=0;c<columns;c++)html+='<col style="width:120px">';
-  html+='</colgroup><thead><tr><th class="corner"></th>';
-  for(let c=0;c<columns;c++)html+=`<th>${columnName(c)}</th>`;
-  html+='</tr></thead><tbody>';
-  for(let r=0;r<rows;r++){
-    const row=data[r]||[];
-    html+=`<tr><th class="row-number">${r+1}</th>`;
-    for(let c=0;c<columns;c++){
-      const value=row[c]??"",key=`${currentSheet}!${r},${c}`;
-      const changed=history.some(item=>item.key===key);
-      const selected=r===selectedRow&&c===selectedColumn;
-      html+=`<td data-row="${r}" data-column="${c}" class="${changed?"changed ":""}${selected?"selected":""}">${escapeHTML(value)}</td>`;
-    }
-    html+="</tr>";
-  }
-  html+="</tbody></table>";
-  spreadsheet.innerHTML=html;
-  spreadsheet.querySelectorAll("td").forEach(cell=>{
-    cell.onclick=()=>selectCell(Number(cell.dataset.row),Number(cell.dataset.column));
-    cell.ondblclick=()=>editCell(cell);
-  });
-  updateFormulaBar();
+  const maxR=Math.max(50,...[...state.cells.values()].map(x=>x.row_index+1)),maxC=Math.max(12,...[...state.cells.values()].map(x=>x.col_index+1));
+  let h='<table><colgroup><col style="width:46px">';
+  for(let c=0;c<maxC;c++)h+='<col style="width:120px">';
+  h+='</colgroup><thead><tr><th class="corner"></th>';
+  for(let c=0;c<maxC;c++)h+=`<th data-col="${c}">${colName(c)}</th>`;h+='</tr></thead><tbody>';
+  for(let r=0;r<maxR;r++){h+=`<tr><th class="row-number" data-row="${r}">${r+1}</th>`;
+    for(let c=0;c<maxC;c++){const x=state.cells.get(key(r,c)),v=x?.value??"",sel=state.selected?.r===r&&state.selected?.c===c,locked=isLocked(r,c);
+      h+=`<td data-row="${r}" data-col="${c}" class="${sel?"selected ":""}${locked?"locked ":""}${x?.updated_at?"changed":""}" style="${fmt(x?.format)}">${esc(v)}</td>`}
+    h+='</tr>'}h+='</tbody></table>';spreadsheet.innerHTML=h;
+  spreadsheet.querySelectorAll("td").forEach(td=>{td.onclick=()=>selectCell(+td.dataset.row,+td.dataset.col);td.ondblclick=()=>edit(td)});
+  spreadsheet.querySelectorAll("th[data-col]").forEach(th=>th.onclick=()=>selectColumn(+th.dataset.col));
+  spreadsheet.querySelectorAll(".row-number").forEach(th=>th.onclick=()=>selectRow(+th.dataset.row));
+  renderTabs();renderHistory();
 }
-
-function selectCell(row,column){
-  selectedRow=row;selectedColumn=column;
-  nameBox.value=columnName(column)+(row+1);
-  updateFormulaBar();render();
-}
-function updateFormulaBar(){
-  const data=workbook[currentSheet],value=data[selectedRow]?.[selectedColumn]??"";
-  formulaBar.value=value;
-}
-
-function editCell(cell){
-  const row=Number(cell.dataset.row),column=Number(cell.dataset.column);
-  const oldValue=workbook[currentSheet][row]?.[column]??"";
-  cell.contentEditable="true";cell.classList.add("editing");cell.focus();
-  const finish=()=>{
-    cell.contentEditable="false";cell.classList.remove("editing");
-    const newValue=cell.textContent;
-    if(newValue!==String(oldValue))commitChange(row,column,oldValue,newValue);
-  };
-  cell.onblur=finish;
-  cell.onkeydown=event=>{
-    if(event.key==="Enter"){event.preventDefault();finish()}
-    if(event.key==="Escape"){cell.textContent=oldValue;cell.contentEditable="false";cell.classList.remove("editing")}
-  };
-}
-
-function commitChange(row,column,oldValue,newValue){
-  if(!workbook[currentSheet][row])workbook[currentSheet][row]=[];
-  workbook[currentSheet][row][column]=newValue;
-  const change={
-    key:`${currentSheet}!${row},${column}`,sheet:currentSheet,row,column,
-    oldValue,newValue,user:"You",time:new Date().toLocaleString()
-  };
-  history.unshift(change);undoStack.push(change);redoStack=[];
-  renderHistory();render();
-}
-
+function fmt(f){f=f||{};return Object.entries(f).map(([k,v])=>({bold:"font-weight:bold",italic:"font-style:italic",underline:"text-decoration:underline",color:"color:"+v,bg:"background:"+v,align:"text-align:"+v,size:"font-size:"+v+"px"}[k]||"")).filter(Boolean).join(";")}
+function renderTabs(){$("sheetTabs").innerHTML=state.sheets.map(s=>`<div class="sheet-tab ${s.id===state.sheet.id?"active":""}" data-id="${s.id}">${esc(s.name)}</div>`).join("");$("sheetTabs").querySelectorAll(".sheet-tab").forEach(t=>t.onclick=async()=>{state.sheet=state.sheets.find(s=>s.id===t.dataset.id);await loadSheet()})}
 function renderHistory(){
-  const container=document.getElementById("historyList");
-  container.innerHTML=history.slice(0,100).map(change=>`
-    <div class="history-item">
-      <div class="history-cell">${change.sheet}!${columnName(change.column)}${change.row+1}</div>
-      <span class="old-value">${escapeHTML(change.oldValue)}</span> → 
-      <span class="new-value">${escapeHTML(change.newValue)}</span><br>
-      ${change.user} · ${change.time}
-    </div>`).join("");
+  $("historyList").innerHTML=state.history.slice(0,100).map(x=>`<div class="history-item"><b>${esc(x.action)}</b> · ${esc(x.email||"User")}<br>${esc(x.detail||"")}<br><small>${new Date(x.created_at).toLocaleString()}</small></div>`).join("");
 }
-
-document.getElementById("undoBtn").onclick=()=>{
-  const change=undoStack.pop();if(!change)return;
-  workbook[change.sheet][change.row][change.column]=change.oldValue;
-  redoStack.push(change);render();
-};
-document.getElementById("redoBtn").onclick=()=>{
-  const change=redoStack.pop();if(!change)return;
-  workbook[change.sheet][change.row][change.column]=change.newValue;
-  undoStack.push(change);render();
-};
-formulaBar.onchange=()=>{
-  const oldValue=workbook[currentSheet][selectedRow]?.[selectedColumn]??"";
-  const newValue=formulaBar.value;
-  if(String(oldValue)!==newValue)commitChange(selectedRow,selectedColumn,oldValue,newValue);
-};
-nameBox.onchange=()=>{
-  const match=nameBox.value.match(/^([A-Z]+)([0-9]+)$/i);if(!match)return;
-  let column=0;for(const ch of match[1].toUpperCase())column=column*26+ch.charCodeAt(0)-64;
-  selectCell(Number(match[2])-1,column-1);
-};
-document.getElementById("wrapBtn").onclick=()=>spreadsheet.classList.toggle("wrap");
-document.getElementById("historyBtn").onclick=()=>document.getElementById("historyPanel").classList.remove("hidden");
-document.getElementById("closeHistory").onclick=()=>document.getElementById("historyPanel").classList.add("hidden");
-document.getElementById("boldBtn").onclick=()=>document.execCommand("bold");
-document.getElementById("italicBtn").onclick=()=>document.execCommand("italic");
-document.getElementById("freezeBtn").onclick=()=>{
-  const row=document.querySelector("tbody tr");if(!row)return;
-  row.querySelectorAll("td,th").forEach(cell=>{
-    if(cell.classList.contains("row-number"))return;
-    cell.style.position="sticky";cell.style.top="27px";cell.style.zIndex="3";
-  });
-};
-document.getElementById("exportBtn").onclick=()=>{
-  alert("Excel export will be connected with ExcelJS/SheetJS in the next build.");
-};
-render();renderHistory();
+async function loadHistory(){
+  const {data}=await supabase.from("excel_edit_history").select("*").eq("workbook_id",state.workbook.id).order("created_at",{ascending:false}).limit(100);
+  state.history=data||[];renderHistory();
+}
+async function saveCell(r,c,value,format=null){
+  if(isLocked(r,c))return alert("This cell is locked.");
+  const old=state.cells.get(key(r,c)),payload={worksheet_id:state.sheet.id,row_index:r,col_index:c,value:String(value??""),formula:null,format:format??old?.format??{},updated_by:state.user.id};
+  const {data,error}=await supabase.from("excel_cells").upsert(payload,{onConflict:"worksheet_id,row_index,col_index"}).select().single();
+  if(error)return alert(error.message);
+  state.cells.set(key(r,c),data);state.dirty=true;state.undo.push({r,c,old:old?.value??"",value:data.value});state.redo=[];
+  render();
+}
+function edit(td){
+  const r=+td.dataset.row,c=+td.dataset.col;if(isLocked(r,c))return alert("This cell is locked.");
+  const old=state.cells.get(key(r,c))?.value??"";td.contentEditable="true";td.focus();
+  const done=async()=>{td.contentEditable="false";if(td.textContent!==String(old))await saveCell(r,c,td.textContent)};
+  td.onblur=done;td.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();done()}if(e.key==="Escape"){td.textContent=old;td.blur()}};
+}
+function selectRow(r){state.selected={r,c:0};state.selection={type:"row",r};render()}
+function selectColumn(c){state.selected={r:0,c};state.selection={type:"column",c};render()}
+async function addLock(type){
+  const s=state.selected||{r:0,c:0},range=state.selection?.type==="row"?{rs:s.r,re:s.r,cs:0,ce:16383}:state.selection?.type==="column"?{rs:0,re:1048575,cs:s.c,ce:s.c}:{rs:s.r,re:s.r,cs:s.c,ce:s.c};
+  const {error}=await supabase.from("excel_cell_locks").insert({workbook_id:state.workbook.id,worksheet_id:state.sheet.id,lock_type:type,row_start:range.rs,row_end:range.re,col_start:range.cs,col_end:range.ce,locked_by:state.user.id});
+  if(error)return alert(error.message);await loadSheet();
+}
+$("lockCellBtn").onclick=()=>addLock("cell");$("lockRowBtn").onclick=()=>addLock("row");$("lockColBtn").onclick=()=>addLock("column");
+$("unlockBtn").onclick=async()=>{const s=selectedCell();const l=state.locks.filter(x=>x.row_start<=s.r&&x.row_end>=s.r&&x.col_start<=s.c&&x.col_end>=s.c);for(const x of l)await supabase.from("excel_cell_locks").delete().eq("id",x.id);await loadSheet()};
+$("historyBtn").onclick=()=>{$("historyPanel").classList.remove("hidden");loadHistory()};$("closeHistory").onclick=()=>$("historyPanel").classList.add("hidden");
+$("boldBtn").onclick=()=>formatSelected("bold",true);$("italicBtn").onclick=()=>formatSelected("italic",true);$("underlineBtn").onclick=()=>formatSelected("underline",true);
+$("fontColor").onchange=e=>formatSelected("color",e.target.value);$("cellColor").onchange=e=>formatSelected("bg",e.target.value);$("fontSize").onchange=e=>formatSelected("size",e.target.value);
+$("alignLeft").onclick=()=>formatSelected("align","left");$("alignCenter").onclick=()=>formatSelected("align","center");$("alignRight").onclick=()=>formatSelected("align","right");
+async function formatSelected(prop,value){const s=selectedCell();const x=state.cells.get(key(s.r,s.c));const f={...(x?.format||{}),[prop]:value};await saveCell(s.r,s.c,x?.value??"",f)}
+$("formulaBar").onchange=()=>{const s=selectedCell();saveCell(s.r,s.c,$("formulaBar").value)};
+$("undoBtn").onclick=async()=>{const x=state.undo.pop();if(x){await saveCell(x.r,x.c,x.old);state.redo.push(x)}};$("redoBtn").onclick=async()=>{const x=state.redo.pop();if(x)await saveCell(x.r,x.c,x.value)};
+$("wrapBtn").onclick=()=>spreadsheet.classList.toggle("wrap");
+$("freezeBtn").onclick=()=>document.querySelector("thead").classList.toggle("frozen");
+$("exportBtn").onclick=()=>exportXlsx();
+$("openComputer").onchange=async e=>{const f=e.target.files[0];if(f)await importXlsx(f)};
+async function importXlsx(file){
+  const buf=await file.arrayBuffer(),wb=XLSX.read(buf,{type:"array"}),name=file.name.replace(/\.xlsx?$/i,"");
+  const {data:w,error}=await supabase.from("excel_workbooks").insert({name,owner_id:state.user.id,original_filename:file.name,source_type:"computer"}).select().single();
+  if(error)return alert(error.message);state.workbook=w;
+  state.sheets=[];for(let i=0;i<wb.SheetNames.length;i++){const n=wb.SheetNames[i],{data:s}=await supabase.from("excel_worksheets").insert({workbook_id:w.id,name:n,sort_order:i}).select().single();state.sheets.push(s);
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:""});const batch=[];rows.forEach((row,r)=>row.forEach((v,c)=>{if(v!=="")batch.push({worksheet_id:s.id,row_index:r,col_index:c,value:String(v),updated_by:state.user.id,format:{}})}));for(let i=0;i<batch.length;i+=500)await supabase.from("excel_cells").insert(batch.slice(i,i+500));
+  }
+  state.sheet=state.sheets[0];$("workbookTitle").textContent=name;history=[];await loadSheet();
+}
+async function exportXlsx(){
+  const wb=XLSX.utils.book_new();for(const s of state.sheets){const {data}=await supabase.from("excel_cells").select("*").eq("worksheet_id",s.id);const maxR=Math.max(0,...(data||[]).map(x=>x.row_index)),maxC=Math.max(0,...(data||[]).map(x=>x.col_index));const a=Array.from({length:maxR+1},()=>Array(maxC+1).fill(""));(data||[]).forEach(x=>a[x.row_index][x.col_index]=x.value);XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(a),s.name.slice(0,31))}XLSX.writeFile(wb,(state.workbook.name||"ExcelShare")+".xlsx")}
+async function start(user){state.user=user;showApp();try{await ensureProfile(user);await loadWorkbook();await loadHistory();subscribe()}catch(e){alert(e.message)}}
+function subscribe(){
+  supabase.channel("excelshare-"+state.workbook.id).on("postgres_changes",{event:"*",schema:"public",table:"excel_cells"},p=>{if(p.new?.worksheet_id===state.sheet?.id&&p.new?.updated_by!==state.user.id){state.cells.set(key(p.new.row_index,p.new.col_index),p.new);render()}}).subscribe();
+}
+supabase.auth.getSession().then(({data})=>{if(data.session)start(data.session.user)});
+supabase.auth.onAuthStateChange((_e,s)=>{if(s&&!state.user)start(s.user)});
+renderTabs();
