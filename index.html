@@ -1,42 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ExcelShare</title>
-<link rel="stylesheet" href="style.css">
-</head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ExcelShare</title><link rel="stylesheet" href="style.css"></head>
 <body>
-<div id="authScreen" class="auth-screen">
-  <div class="auth-card">
-    <div class="auth-logo">▦ ExcelShare</div>
-    <h1>Collaborative Excel</h1>
-    <p class="muted">Sign in so every edit can be identified.</p>
-    <div class="auth-tabs"><button id="loginTab" class="active">Sign In</button><button id="signupTab">Create Account</button></div>
-    <input id="authEmail" type="email" placeholder="Email address" autocomplete="email">
-    <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password">
-    <input id="authName" class="signup-only hidden" type="text" placeholder="Your name">
-    <button id="authBtn" class="primary">Sign In</button>
-    <div id="authMessage" class="auth-message"></div>
-  </div>
-</div>
-
+<div id="authScreen" class="auth-screen"><div class="auth-card">
+<div class="auth-logo">▦ ExcelShare</div><h1>Collaborative Excel</h1><p class="muted">Sign in so every edit can be identified.</p>
+<div class="auth-tabs"><button id="loginTab" class="active">Sign In</button><button id="signupTab">Create Account</button></div>
+<input id="authEmail" type="email" placeholder="Email address"><input id="authPassword" type="password" placeholder="Password">
+<input id="authName" class="signup-only hidden" type="text" placeholder="Your name">
+<button id="authBtn" class="primary">Sign In</button><div id="authMessage" class="auth-message"></div>
+</div></div>
 <div id="appScreen" class="app-screen hidden">
-<header class="topbar">
-  <div class="brand">▦ ExcelShare</div>
-  <div class="toolbar">
-    <button id="undoBtn" title="Undo">↶</button><button id="redoBtn" title="Redo">↷</button>
-    <span class="separator"></span><button id="boldBtn"><b>B</b></button><button id="italicBtn"><i>I</i></button>
-    <button id="wrapBtn">Wrap</button><button id="freezeBtn">Freeze</button><span class="separator"></span>
-    <button id="historyBtn">History</button><button id="exportBtn">Export</button>
-  </div>
-  <div class="user-area"><span id="userBadge"></span><button id="signOutBtn">Sign out</button></div>
-</header>
+<header class="topbar"><div class="brand">▦ ExcelShare</div><div class="toolbar">
+<button id="undoBtn">↶</button><button id="redoBtn">↷</button><span class="separator"></span><button id="boldBtn"><b>B</b></button><button id="italicBtn"><i>I</i></button><button id="wrapBtn">Wrap</button><button id="freezeBtn">Freeze</button><span class="separator"></span><button id="historyBtn">History</button><button id="exportBtn">Export</button>
+</div><div class="user-area"><span id="userBadge"></span><button id="signOutBtn">Sign out</button></div></header>
 <div class="formula-bar"><input id="nameBox" value="A1"><span class="fx">fx</span><input id="formulaBar" placeholder="Select a cell..."></div>
-<main><div class="spreadsheet-container"><div id="spreadsheet" tabindex="0"></div></div>
-<aside id="historyPanel" class="history-panel hidden"><div class="history-header"><strong>Edit History</strong><button id="closeHistory">×</button></div><div id="historyList"></div></aside></main>
-<footer id="sheetTabs" class="sheet-tabs"></footer>
-</div>
-<script type="module" src="app.js"></script>
-</body>
-</html>
+<main><div class="spreadsheet-container"><div id="spreadsheet" tabindex="0"></div></div><aside id="historyPanel" class="history-panel hidden"><div class="history-header"><strong>Edit History</strong><button id="closeHistory">×</button></div><div id="historyList"></div></aside></main>
+<footer id="sheetTabs" class="sheet-tabs"></footer></div>
+<script type="module" src="app.js"></script></body></html>
