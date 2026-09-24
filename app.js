@@ -35,13 +35,13 @@ async function ensureProfile(user){
   await supabase.from("excel_profiles").upsert({user_id:user.id,email:user.email,display_name:user.user_metadata?.display_name||user.email?.split("@")[0]},{onConflict:"user_id"});
 }
 async function loadWorkbook(){
-  const {data:members,error}=await supabase.from("excel_workbook_members").select("workbook_id,role,excel_workbooks(*)").eq("user_id",state.user.id);
+  const wid=location.pathname.match(/^\/w\/([0-9a-f-]{20,})$/i)?.[1]; const {data:members,error}=await supabase.from("excel_workbook_members").select("workbook_id,role,excel_workbooks(*)").eq("user_id",state.user.id);
   if(error)throw error;
-  if(!members?.length){
+  if(wid){ const m=members?.find(x=>x.workbook_id===wid); if(!m) throw new Error("You do not have access to this workbook."); state.workbook=m.excel_workbooks; } else if(!members?.length){
     const {data,error:e}=await supabase.from("excel_workbooks").insert({name:"My Workbook",owner_id:state.user.id,source_type:"new"}).select().single();
     if(e)throw e;
     state.workbook=data;
-  }else state.workbook=members[0].excel_workbooks;
+  }else if(!state.workbook) state.workbook=members[0].excel_workbooks;
   const {data:sheets,error:e}=await supabase.from("excel_worksheets").select("*").eq("workbook_id",state.workbook.id).order("sort_order");
   if(e)throw e;
   if(!sheets.length){
@@ -73,12 +73,12 @@ function render(){
   for(let c=0;c<maxC;c++)h+=`<th data-col="${c}">${colName(c)}</th>`;h+='</tr></thead><tbody>';
   for(let r=0;r<maxR;r++){h+=`<tr><th class="row-number" data-row="${r}">${r+1}</th>`;
     for(let c=0;c<maxC;c++){const x=state.cells.get(key(r,c)),v=x?.value??"",sel=state.selected?.r===r&&state.selected?.c===c,locked=isLocked(r,c);
-      h+=`<td data-row="${r}" data-col="${c}" class="${sel?"selected ":""}${locked?"locked ":""}${x?.updated_at?"changed":""}" style="${fmt(x?.format)}">${esc(v)}</td>`}
+      h+=`<td data-row="${r}" data-col="${c}" class="${sel?"selected ":""}${locked?"locked ":""}${state.history.some(h=>h.action==="cell_edit"&&h.worksheet_id===state.sheet.id&&h.row_index===r&&h.col_index===c)?"changed":""}" style="${fmt(x?.format)}">${esc(v)}</td>`}
     h+='</tr>'}h+='</tbody></table>';spreadsheet.innerHTML=h;
   spreadsheet.querySelectorAll("td").forEach(td=>{td.onclick=()=>selectCell(+td.dataset.row,+td.dataset.col);td.ondblclick=()=>edit(td)});
   spreadsheet.querySelectorAll("th[data-col]").forEach(th=>th.onclick=()=>selectColumn(+th.dataset.col));
   spreadsheet.querySelectorAll(".row-number").forEach(th=>th.onclick=()=>selectRow(+th.dataset.row));
-  renderTabs();renderHistory();
+  renderTabs(); $("openSupabase").onclick=async()=>{const {data}=await supabase.from("excel_workbook_members").select("workbook_id,role,excel_workbooks(*)").eq("user_id",state.user.id);const list=(data||[]).map(x=>x.excel_workbooks.name+" — "+x.role+" — "+location.origin+"/w/"+x.workbook_id).join("\n");alert(list||"No workbooks found.");}; $("openDrive").onclick=()=>alert("Google Drive requires Google OAuth/Picker credentials. The XLSX editor is ready; connect a Google Cloud OAuth client to enable Drive import.");renderHistory();
 }
 function fmt(f){f=f||{};return Object.entries(f).map(([k,v])=>({bold:"font-weight:bold",italic:"font-style:italic",underline:"text-decoration:underline",color:"color:"+v,bg:"background:"+v,align:"text-align:"+v,size:"font-size:"+v+"px"}[k]||"")).filter(Boolean).join(";")}
 function renderTabs(){$("sheetTabs").innerHTML=state.sheets.map(s=>`<div class="sheet-tab ${s.id===state.sheet.id?"active":""}" data-id="${s.id}">${esc(s.name)}</div>`).join("");$("sheetTabs").querySelectorAll(".sheet-tab").forEach(t=>t.onclick=async()=>{state.sheet=state.sheets.find(s=>s.id===t.dataset.id);await loadSheet()})}
@@ -112,12 +112,12 @@ async function addLock(type){
 }
 $("lockCellBtn").onclick=()=>addLock("cell");$("lockRowBtn").onclick=()=>addLock("row");$("lockColBtn").onclick=()=>addLock("column");
 $("unlockBtn").onclick=async()=>{const s=selectedCell();const l=state.locks.filter(x=>x.row_start<=s.r&&x.row_end>=s.r&&x.col_start<=s.c&&x.col_end>=s.c);for(const x of l)await supabase.from("excel_cell_locks").delete().eq("id",x.id);await loadSheet()};
-$("historyBtn").onclick=()=>{$("historyPanel").classList.remove("hidden");loadHistory()};$("closeHistory").onclick=()=>$("historyPanel").classList.add("hidden");
+$("historyBtn").onclick=()=>{$("historyPanel").classList.remove("hidden");loadHistory()}; $("shareBtn").onclick=async()=>{const email=prompt("Email address to invite:");if(!email)return;const role=confirm("OK = Editor, Cancel = Viewer")?"editor":"viewer";const {data,error}=await supabase.functions.invoke("excelshare-invite",{body:{email,role,workbook_id:state.workbook.id,redirect_to:location.origin}});alert(error?.message||data?.error||(data?.ok?"Invitation sent.":"Unable to send invitation."))};$("closeHistory").onclick=()=>$("historyPanel").classList.add("hidden");
 $("boldBtn").onclick=()=>formatSelected("bold",true);$("italicBtn").onclick=()=>formatSelected("italic",true);$("underlineBtn").onclick=()=>formatSelected("underline",true);
 $("fontColor").onchange=e=>formatSelected("color",e.target.value);$("cellColor").onchange=e=>formatSelected("bg",e.target.value);$("fontSize").onchange=e=>formatSelected("size",e.target.value);
 $("alignLeft").onclick=()=>formatSelected("align","left");$("alignCenter").onclick=()=>formatSelected("align","center");$("alignRight").onclick=()=>formatSelected("align","right");
 async function formatSelected(prop,value){const s=selectedCell();const x=state.cells.get(key(s.r,s.c));const f={...(x?.format||{}),[prop]:value};await saveCell(s.r,s.c,x?.value??"",f)}
-$("formulaBar").onchange=()=>{const s=selectedCell();saveCell(s.r,s.c,$("formulaBar").value)};
+$("formulaBar").onchange=()=>{const s=selectedCell();saveCell(s.r,s.c,$("formulaBar").value)}; $("nameBox").onchange=()=>{const m=$("nameBox").value.match(/^([A-Z]+)([0-9]+)$/i);if(!m)return;let n=0;for(const ch of m[1].toUpperCase())n=n*26+ch.charCodeAt(0)-64;selectCell(+m[2]-1,n-1)};
 $("undoBtn").onclick=async()=>{const x=state.undo.pop();if(x){await saveCell(x.r,x.c,x.old);state.redo.push(x)}};$("redoBtn").onclick=async()=>{const x=state.redo.pop();if(x)await saveCell(x.r,x.c,x.value)};
 $("wrapBtn").onclick=()=>spreadsheet.classList.toggle("wrap");
 $("freezeBtn").onclick=()=>document.querySelector("thead").classList.toggle("frozen");
