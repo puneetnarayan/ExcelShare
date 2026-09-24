@@ -1,0 +1,1 @@
+{"rewrites":[{"source":"/w/:path*","destination":"/index.html"}]}
