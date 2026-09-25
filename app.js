@@ -135,6 +135,7 @@ async function importXlsx(file){
       .select().single();
     if(we) throw we;
     state.workbook=w;
+    state.cells.clear();
     state.sheets=[];
     $("workbookTitle").textContent=name;
 
@@ -162,7 +163,7 @@ async function importXlsx(file){
         const {data:inserted,error:ce}=await supabase.from("excel_cells")
           .insert(part).select();
         if(ce) throw new Error("Could not import cells in sheet '"+sheetName+"': "+ce.message);
-        (inserted||[]).forEach(x=>state.cells.set(key(x.row_index,x.col_index),x));
+        if(si===0) (inserted||[]).forEach(x=>state.cells.set(key(x.row_index,x.col_index),x));
       }
     }
 
