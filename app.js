@@ -170,7 +170,9 @@ async function importXlsx(file){
     state.selected={r:0,c:0};
     state.locks=[];
     state.history=[];
-    await loadSheet();
+    // The imported rows are already in state.cells. Render them immediately;
+    // this avoids replacing the freshly imported data with a stale/empty read.
+    render();
     await loadHistory();
     await subscribe();
   }catch(e){
